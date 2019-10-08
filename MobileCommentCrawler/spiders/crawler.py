@@ -78,7 +78,7 @@ class vatgia(CrawlSpider):
     def parse_item(self, response):
         data = {}
         data['url'] = response.url
-        data['name'] = response.css('div#header_navigate_breadcrumb b::text').extract_first()
+        data['name'] = response.css('div.container_width b::text').extract_first()
         data['comments'] = []
         # cmt_list = response.css('ul#dpr_listing li')
         cmt_list = response.css('li')

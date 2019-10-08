@@ -1,0 +1,5 @@
+.idea/*
+.ipynb_checkpoints/*
+MobileCommentCrawler/__pycache__/*
+MobileCommentCrawler/spiders/__pycache__/*
+MobileCommentCrawler/Notebook/.ipynb_checkpoints/*
