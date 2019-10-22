@@ -2,6 +2,7 @@ from scrapy import Selector, Request
 from scrapy.spiders import CrawlSpider
 import re
 from scrapy_splash import SplashRequest
+import time
 
 wait_script = """
 function main(splash, args)
@@ -25,7 +26,7 @@ function main(splash, args)
 end
 """
 
-get_comment_script = """
+get_comment_script_tiki = """
 function main(splash, args)
   assert(splash:go(args.url))
   assert(splash:wait(0.5))
@@ -46,14 +47,34 @@ function main(splash, args)
 end
 """
 
+get_comment_script_lazada = """
+function main(splash, args)
+  assert(splash:go(args.url))
+  assert(splash:wait(2))
+  comment_element = splash:select('div.mod-reviews')
+  btn_list = splash:select_all('div.pdp-mod-review button.next-btn')
+  next_page_element = btn_list[#btn_list]
+  return_html = splash:select('div.pdp-mod-product-badge-wrapper').node.innerHTML .. comment_element.innerHTML
+  while (not next_page_element:hasAttribute('disabled'))
+  do
+    next_page_element:click()
+    assert(splash:wait(0.5))
+    return_html = return_html .. splash:select('div.mod-reviews').node.innerHTML
+    btn_list = splash:select_all('div.pdp-mod-review button.next-btn')
+	next_page_element = btn_list[#btn_list]
+  end
+  return {
+    html = return_html,
+    cookies = splash:get_cookies()
+  }
+end
+"""
 
 class vatgia(CrawlSpider):
     name = 'vatgia'
     # urls = []
     domain = 'https://vatgia.com'
     index = 1
-    # for i in range(389):
-        # urls.append("https://vatgia.com/home/listudv.php?iCat=438&p10=4&page={}".format(i+1))
     start_urls = ["https://vatgia.com/home/listudv.php?iCat=438&p10=4"]
 
     def start_requests(self):
@@ -61,14 +82,13 @@ class vatgia(CrawlSpider):
             yield SplashRequest(args={'lua_source' : wait_script}, url=url, callback=self.parse_first, endpoint='execute')
 
     def parse_first(self, response):
-        # print(response.css("#type_product_list_udv div.wrapper"))
         for item in response.css("#type_product_list_udv div.wrapper"):
             if (len(item.css("div.group_rating_order")) != 0):
                 next_link = item.css("a.picture_link::attr(href)").extract_first()
                 next_link_split = next_link.split('/')
                 url = self.domain + '/' + next_link_split[1] + '/' + next_link_split[2] + '/' + 'binh_chon_new' + '/' + next_link_split[3]
-                print(url)
-                yield SplashRequest(args={'lua_source' : get_comment_script}, url=url, callback=self.parse_item, endpoint='execute')
+                yield SplashRequest(args={'lua_source' : get_comment_script_tiki}, url=url, callback=self.parse_item, endpoint='execute')
+
 
         if (self.index < 50):
             self.index += 1
@@ -91,13 +111,50 @@ class vatgia(CrawlSpider):
 
         yield data
 
+
+class lazada(CrawlSpider):
+    name = 'lazada'
+    index = 1
+    start_urls = ['https://www.lazada.vn/dien-thoai-di-dong/?page=1&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ']
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script})
+
+    def parse_first(self, response):
+        for item in response.css('div.c2prKC'):
+            if item.css('div.c2JB4x.c6Ntq9') is not None:
+                url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
+                yield SplashRequest(url='https:' + url, callback=self.parse_item, endpoint='execute', args={'lua_source' : get_comment_script_lazada})
+            time.sleep(5)
+
+        if self.index < 102:
+            self.index += 1
+            time.sleep(200)
+            yield SplashRequest(url = 'https://www.lazada.vn/dien-thoai-di-dong/?page={}&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ'.format(self.index),
+                                callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script_2})
+
+    def parse_item(self, response):
+        data = {}
+        data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
+        comments = []
+        for item in response.css('div.item'):
+            comment = item.css('div.content::text').extract_first()
+            if comment is not None:
+                stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
+                comments.append({'stars': stars, 'comments': comment})
+
+        data['comments'] = comments
+        data['url'] = response.url
+        yield data
+
 class TestVatGia(CrawlSpider):
     name = 'vatgiatest'
     start_urls = ["https://vatgia.com/438/1635193/binh_chon_new/apple-iphone-4s-16gb-black-b%E1%BA%A3n-qu%E1%BB%91c-t%E1%BA%BF.html"]
 
     def start_requests(self):
         for url in self.start_urls:
-            yield SplashRequest(args={'lua_source' : get_comment_script}, url=url, callback=self.parse, endpoint='execute')
+            yield SplashRequest(args={'lua_source' : get_comment_script_tiki}, url=url, callback=self.parse, endpoint='execute')
 
     def parse(self, response):
         comments = []
@@ -112,3 +169,4 @@ class TestVatGia(CrawlSpider):
         data = {}
         data['comments'] = comments
         yield data
+
