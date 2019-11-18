@@ -35,6 +35,7 @@ DOWNLOADER_MIDDLEWARES = {
 # Obey robots.txt rules
 ROBOTSTXT_OBEY = True
 
+DOWNLOAD_DELAY = 45
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
 #CONCURRENT_REQUESTS = 32
 
