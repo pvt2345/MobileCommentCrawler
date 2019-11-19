@@ -18,7 +18,7 @@ end
 wait_script_2 = """
 function main(splash, args)
   assert(splash:go(args.url))
-  assert(splash:wait(0.5))
+  assert(splash:wait(2))
   return {
     html = splash:html(),
     cookies = splash:get_cookies()
@@ -70,6 +70,81 @@ function main(splash, args)
 end
 """
 
+wait_script_shopee = """
+    function main(splash, args)
+      local scroll_to = splash:jsfunc("window.scrollTo")
+      local get_third_body_height = splash:jsfunc(
+        "function() {return document.body.scrollHeight/4;}"
+      )
+      assert(splash:go(args.url))
+      assert(splash:wait(2))
+      for _ = 1, 4 do
+        scroll_to(0, get_third_body_height()*_)
+        assert(splash:wait(0.5))
+      end
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies(),
+        png = splash:png()
+      }
+    end
+    """
+
+wait_script_2_shopee = """
+    function main(splash, args)
+      local scroll_to = splash:jsfunc("window.scrollTo")
+      local get_third_body_height = splash:jsfunc(
+        "function() {return document.body.scrollHeight/4;}"
+      )
+      assert(splash:go(args.url))
+      assert(splash:wait(0.5))
+      for _ = 1, 4 do
+        scroll_to(0, get_third_body_height()*_)
+        assert(splash:wait(0.5))
+      end
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies(),
+        png = splash:png()
+      }
+    end
+    """
+
+get_comment_script_shopee = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(5))
+      danh_gia_button = splash:select_all('div.flex.M3KjhJ')[2]
+      danh_gia_button:mouse_click()
+      assert(splash:wait(3))
+      co_binh_luan_button = splash:select('div.product-rating-overview__filter--with-comment')
+      co_binh_luan_button:mouse_click()
+      assert(splash:wait(2))
+        return_html = splash:select('div.qaNIZv').node.outerHTML .. splash:select('div.shopee-product-comment-list').node.innerHTML
+      co_binh_luan_text = co_binh_luan_button:text()
+        so_binh_luan = tonumber(co_binh_luan_text:sub(-4, -2))
+      if so_binh_luan == nil then
+        so_binh_luan = tonumber(co_binh_luan_text:sub(-3, -2))
+      end
+      if so_binh_luan == nil then
+        so_binh_luan = tonumber(co_binh_luan_text:sub(-2, -2))
+      end
+      num_page = math.floor(so_binh_luan/6)
+      if num_page > 0 then
+        for i = 1, num_page do
+          next_page_button = splash:select('button.shopee-icon-button--right')
+          next_page_button:mouse_click()
+          assert(splash:wait(2))
+          return_html = return_html .. splash:select('div.shopee-product-comment-list').node.innerHTML
+        end
+      end
+
+      return {
+        html = return_html,
+        cookies = splash:get_cookies()
+      }
+    end
+    """
 class vatgia(CrawlSpider):
     name = 'vatgia'
     # urls = []
@@ -111,7 +186,6 @@ class vatgia(CrawlSpider):
 
         yield data
 
-
 class lazada(CrawlSpider):
     name = 'lazada'
     index = 1
@@ -146,6 +220,68 @@ class lazada(CrawlSpider):
 
         data['comments'] = comments
         data['url'] = response.url
+        yield data
+
+class sendo(CrawlSpider):
+    name = 'sendo'
+    start_urls = ["https://www.sendo.vn/may-da-qua-su-dung"]
+    index = 1
+    domain = 'https://www.sendo.vn'
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(args={'lua_source' : wait_script}, url=url, callback=self.parse_first, endpoint='execute')
+
+    def parse_first(self, response):
+        for item in response.css('a[aria-label="item_3KnU"]'):
+            if len(item.css('div.stars_2og7').extract()) != 0:
+                item_link = item.css('::attr(href)').extract_first()
+                yield SplashRequest(args={'lua_source' : wait_script}, url = self.domain + item_link , callback=self.parse_item, endpoint='execute')
+
+        if(self.index < 243):
+            self.index += 1
+            yield SplashRequest(args={'lua_source' : wait_script_2}, url="https://www.sendo.vn/may-da-qua-su-dung?p={}".format(self.index), callback=self.parse_first, endpoint='execute')
+
+    def parse_item(self, response):
+        pass
+
+class shopee(CrawlSpider):
+    name = 'shopee'
+    start_urls = ['https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page=0&sortBy=pop']
+    index = 0
+
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(url=url, callback=self.parse_first, args={'lua_source' : wait_script_shopee}, endpoint='execute')
+
+    def parse_first(self, response):
+        urls = []
+        for item in response.css('div.shopee-search-item-result__item'):
+            if (item.css('div.shopee-rating-stars').extract_first() is not None):
+                urls.append(item.css('a[data-sqe="link"]::attr(href)').extract_first())
+
+        for url in urls:
+            yield SplashRequest(url=response.urljoin(url), callback=self.parse_item, args={'lua_source' : get_comment_script_shopee}, endpoint='execute')
+
+        if self.index < 99:
+            self.index += 1
+            yield SplashRequest(url='https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page={}&sortBy=pop'.format(self.index), args={'lua_source' : wait_script_shopee}, endpoint='execute', callback=self.parse_first)
+
+
+    def parse_item(self, response):
+        data = {}
+        url = response.url
+        name = response.css('div.qaNIZv::text').extract_first()
+        comments = []
+        for item in response.css('div.shopee-product-rating__main'):
+            stars = len(item.css('svg.shopee-svg-icon.icon-rating-solid--active.icon-rating-solid').extract())
+            comment = item.css('div.shopee-product-rating__content::text').extract_first()
+            comments.append({'stars': stars, 'comment': comment})
+
+        data['url'] = url
+        data['name'] = name
+        data['comments'] = comments
+
         yield data
 
 class TestVatGia(CrawlSpider):
