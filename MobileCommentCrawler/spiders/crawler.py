@@ -43,7 +43,7 @@ function main(splash, args)
   return {
     html = return_html,
     cookies = splash:get_cookies()
-  }http://google.com
+  }
 end
 """
 
