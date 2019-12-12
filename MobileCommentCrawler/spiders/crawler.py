@@ -43,7 +43,7 @@ function main(splash, args)
   return {
     html = return_html,
     cookies = splash:get_cookies()
-  }
+  }http://google.com
 end
 """
 
@@ -306,3 +306,74 @@ class TestVatGia(CrawlSpider):
         data['comments'] = comments
         yield data
 
+class thegioididong(CrawlSpider):
+    name = 'thegioididong'
+    wait_script = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(5))
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies()
+      }
+    end
+    """
+
+    get_comment_script = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(0.75))
+      return_html = splash:select('ul.breadcrumb').node.outerHTML
+      return_html = return_html .. splash:select('ul.ratingLst').node.outerHTML
+      btn_elements = splash:select_all('div.pagcomment a')
+        if #btn_elements > 0 then
+        last_element = btn_elements[#btn_elements]
+        while (last_element:text() == "»")
+        do
+            last_element.click()
+            assert(splash:wait(1.25))
+            return_html = return_html .. splash:select('ul.ratingLst').node.outerHTML
+            btn_elements = splash:select_all('div.pagcomment a')
+            last_element = btn_elements[#btn_elements]
+        end
+      end
+      
+      return {
+        html = return_html,
+        cookies = splash:get_cookies()
+      }
+    end
+    """
+
+
+    start_urls = ["https://www.thegioididong.com/dtdd#i:5"]
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(args={'lua_source' : self.wait_script}, url=url, callback=self.parse_first, endpoint='execute')
+
+    def parse_first(self, response):
+        urls = []   
+        for item in response.css('ul.homeproduct li'):
+            if len(item.css('div.ratingresult i')) > 0:
+                urls.append(item.css('a::attr(href)').extract_first())
+
+        for url in urls:
+            yield SplashRequest(args={'lua_source' : self.get_comment_script}, url=response.urljoin(url) + '/danh-gia', callback=self.parse_item, endpoint='execute')
+
+
+    def parse_item(self, response):
+        url = response.url
+        name = response.css('ul.breadcrumb li')[3].css('a::text').extract_first()
+        comments = []
+        for item in response.css('li.par'):
+            stars = len(item.css('i.iconcom-txtstar'))
+            comment = item.css('div.rc i')[-1].css('::text').extract_first()
+            comments.append({'stars' : stars, 'comment' : comment})
+
+        data = {}
+        data['url'] = url
+        data['comments'] = comments
+        data['name'] = name
+
+        yield data
