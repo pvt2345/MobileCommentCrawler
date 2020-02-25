@@ -33,7 +33,7 @@ DOWNLOADER_MIDDLEWARES = {
 #USER_AGENT = 'MobileCommentCrawler (+http://www.yourdomain.com)'
 
 # Obey robots.txt rules
-ROBOTSTXT_OBEY = True
+ROBOTSTXT_OBEY = False
 
 # DOWNLOAD_DELAY = 15
 # Configure maximum concurrent requests performed by Scrapy (default: 16)

@@ -3,6 +3,8 @@ from scrapy.spiders import CrawlSpider
 import re
 from scrapy_splash import SplashRequest
 import time
+import requests
+import json
 
 wait_script = """
 function main(splash, args)
@@ -191,6 +193,19 @@ class lazada(CrawlSpider):
     index = 1
     start_urls = ['https://www.lazada.vn/dien-thoai-di-dong/?page=1&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ']
 
+    wait_script = """
+    function main(splash, args)
+    assert(splash:go(args.url))
+    assert(splash:wait(0.5))
+    return {
+      html = splash:html(),
+      png = splash:png(),
+      har = splash:har(),
+      cookies = splash:get_cookies(),
+    }
+    end
+    """
+
     def start_requests(self):
         for url in self.start_urls:
             yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script})
@@ -199,28 +214,48 @@ class lazada(CrawlSpider):
         for item in response.css('div.c2prKC'):
             if item.css('div.c2JB4x.c6Ntq9') is not None:
                 url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
-                yield SplashRequest(url='https:' + url, callback=self.parse_item, endpoint='execute', args={'lua_source' : get_comment_script_lazada})
-            time.sleep(5)
+                item_id = re.findall('i\d+', url)[0][1:]
+                self.page_num = 1
+                yield SplashRequest(url = 'https://my.lazada.vn/pdp/review/getReviewList?itemId={}&pageSize=5&filter=0&sort=0&pageNo=1'.format(item_id), callback=self.parse_item, endpoint='execute', args={'lua_source' : self.wait_script})
 
-        if self.index < 102:
+            # time.sleep(5)
+
+        if self.index < 102:    
             self.index += 1
             time.sleep(200)
             yield SplashRequest(url = 'https://www.lazada.vn/dien-thoai-di-dong/?page={}&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ'.format(self.index),
                                 callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script_2})
 
-    def parse_item(self, response):
-        data = {}
-        data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
-        comments = []
-        for item in response.css('div.item'):
-            comment = item.css('div.content::text').extract_first()
-            if comment is not None:
-                stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
-                comments.append({'stars': stars, 'comments': comment})
+    # def parse_item(self, response):
+    #     data = {}
+    #     data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
+    #     comments = []
+    #     for item in response.css('div.item'):
+    #         comment = item.css('div.content::text').extract_first()
+    #         if comment is not None:
+    #             stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
+    #             comments.append({'stars': stars, 'comments': comment})
 
-        data['comments'] = comments
-        data['url'] = response.url
-        yield data
+    #     data['comments'] = comments
+    #     data['url'] = response.url
+    #     yield data
+
+    def parse_item(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        items = data_get['model']['items']
+        if items is not None:
+            for item in items:
+                # try:
+                if item['reviewContent'] is not None:
+                    _data = {}
+                    _data['content'] = item['reviewContent']
+                    _data['stars'] = item['rating']
+                    _data['user_name'] = item['buyerName']
+                    _data['user_id'] = item['buyerId']
+                    yield _data
+
+            self.page_num += 1
+            yield SplashRequest(url= re.sub('pageNo=\d+', 'pageNo={}'.format(self.page_num), response.url), args={'lua_source' : self.wait_script}, callback=self.parse_item, endpoint='execute')
 
 class sendo(CrawlSpider):
     name = 'sendo'
@@ -377,3 +412,10 @@ class thegioididong(CrawlSpider):
         data['name'] = name
 
         yield data
+
+
+
+
+
+
+

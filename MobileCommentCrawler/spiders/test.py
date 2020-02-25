@@ -1,6 +1,7 @@
 from scrapy.spiders import CrawlSpider
 from scrapy_splash import SplashRequest
 import time
+from MobileCommentCrawler.items import MobilecommentcrawlerItem
 
 wait_script = """
 function main(splash, args)
@@ -46,42 +47,6 @@ function main(splash, args)
   }
 end
 """
-
-class lazada(CrawlSpider):
-    name = 'lazada'
-    index = 1
-    start_urls = ['https://www.lazada.vn/dien-thoai-di-dong/?page=1']
-
-    def start_requests(self):
-        for url in self.start_urls:
-            yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script})
-
-    def parse_first(self, response):
-        for item in response.css('div.c2prKC'):
-            if item.css('div.c2JB4x.c6Ntq9') is not None:
-                url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
-                yield SplashRequest(url='https:' + url, callback=self.parse_item, endpoint='execute', args={'lua_source' : get_comment_script_lazada})
-            time.sleep(5)
-
-        if self.index < 102:
-            self.index += 1
-            time.sleep(200)
-            yield SplashRequest(url = 'https://www.lazada.vn/dien-thoai-di-dong/?page={}&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ'.format(self.index),
-                                callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script_2})
-
-    def parse_item(self, response):
-        data = {}
-        data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
-        comments = []
-        for item in response.css('div.item'):
-            comment = item.css('div.content::text').extract_first()
-            if comment is not None:
-                stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
-                comments.append({'stars': stars, 'comments': comment})
-
-        data['comments'] = comments
-        data['url'] = response.url
-        yield data
 
 
 class testLazada(CrawlSpider):
