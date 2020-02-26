@@ -3,3 +3,12 @@
 MobileCommentCrawler/__pycache__/*
 MobileCommentCrawler/spiders/__pycache__/*
 MobileCommentCrawler/Notebook/.ipynb_checkpoints/*
+MobileCommentCrawler/*.json
+build/*
+dbs/*
+eggs/*
+logs/*
+project.egg-info/*
+twistd.pid
+.DS_Store
+setup.py

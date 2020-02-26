@@ -5,10 +5,19 @@ from scrapy_splash import SplashRequest
 import time
 import requests
 import json
+import pymongo
+
+def InsertToMongo(document, database, collection):
+    MyClient = pymongo.MongoClient('mongodb://localhost:27017/')
+    MyDb = MyClient[database]
+    MyCol = MyDb[collection]
+
+    if MyCol.find_one({'comment_id' : document['comment_id']}) is None:
+        MyCol.insert_one(document)
+
 
 
 class tikipost(CrawlSpider):
-
     name= 'tikipost'
 
     wait_script = """
@@ -43,9 +52,10 @@ class tikipost(CrawlSpider):
             _data = {}
             _data['content'] = item['content']
             _data['customer_id'] = item['customer_id']
-            _data['user_name'] = item['created_by']['full_name']
+            _data['user_name'] = item['created_by']['name']
             _data['stars'] = item['rating']
-
+            _data['comment_id'] = item['id']
+            InsertToMongo(_data, 'reviews', 'tiki')
             yield _data
 
 
@@ -93,12 +103,14 @@ class shopeepost(CrawlSpider):
             for item in ratings:
                 if item['comment'] != '' and item['comment'] is not None: 
                     _data = {}
+                    _data['comment_id'] = item['cmtid']
                     _data['content'] = item['comment']
                     _data['user_id'] = item['userid']
                     _data['user_name'] = item['author_username']
                     _data['stars'] = item['rating_star']
                     _data['item_id'] = item['itemid']
                     _data['shop_id'] = item['shopid']
+                    InsertToMongo(_data, 'reviews', 'shopee')
                     yield _data
 
             self.offset += 6
@@ -150,6 +162,8 @@ class lazadapost(CrawlSpider):
                     _data['stars'] = item['rating']
                     _data['user_name'] = item['buyerName']
                     _data['user_id'] = item['buyerId']
+                    _data['comment_id'] = item['reviewRateId']
+                    InsertToMongo(_data, 'reviews', 'lazada')
                     yield _data
 
             self.page_num += 1
