@@ -5,6 +5,16 @@ from scrapy_splash import SplashRequest
 import time
 import requests
 import json
+import pymongo
+
+
+def InsertToMongo(document, database, collection):
+    MyClient = pymongo.MongoClient('mongodb://localhost:27017/')
+    MyDb = MyClient[database]
+    MyCol = MyDb[collection]
+
+    if MyCol.find_one({'comment_id' : document['comment_id']}) is None:
+        MyCol.insert_one(document)
 
 wait_script = """
 function main(splash, args)
@@ -147,6 +157,174 @@ get_comment_script_shopee = """
       }
     end
     """
+class tiki(CrawlSpider):
+    name = 'tiki'
+
+    get_link_scripts = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(1.5))
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies()
+      }
+    end
+    """
+
+    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+        super(tiki, self).__init__(*args, **kwargs)
+        for i in range(start_page, end_page + 1):
+            self.start_urls.append(url + '&page={}'.format(i))
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : self.get_link_scripts})
+
+    def parse_first(self, response):
+        data_ids = response.css('a::attr(data-id)').extract()
+        for item in data_ids:
+            yield SplashRequest(url='https://tiki.vn/api/v2/reviews?product_id={}&limit=1000'.format(item), callback=self.parse_item, endpoint='execute', args={'lua_source' : self.get_link_scripts})
+
+    def parse_item(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        for item in data_get['data']:
+            _data = {}
+            _data['content'] = item['content']
+            _data['customer_id'] = item['customer_id']
+            _data['user_name'] = item['created_by']['name']
+            _data['stars'] = item['rating']
+            _data['comment_id'] = item['id']
+            # InsertToMongo(_data, 'reviews', 'tiki')
+            yield _data
+
+class shopee(CrawlSpider):
+    name = 'shopee'
+
+    get_link_scripts = """
+    function main(splash, args)
+      splash:set_viewport_full()
+      local scroll_to = splash:jsfunc("window.scrollTo")
+      local get_third_body_height = splash:jsfunc(
+        "function() {return document.body.scrollHeight/4;}"
+      )
+      assert(splash:go(args.url))
+      assert(splash:wait(2))
+      for _ = 1, 4 do
+        scroll_to(0, get_third_body_height()*_)
+        assert(splash:wait(1))
+      end
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies(),
+        png = splash:png()
+      }
+    end
+    """
+
+    custom_settings = {
+        'DOWNLOAD_DELAY' : 3
+    }
+
+    wait_script = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(1.5))
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies()
+      }
+    end
+    """
+
+    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+        super(shopee, self).__init__(*args, **kwargs)
+        for i in range(start_page - 1, end_page):
+            self.start_urls.append(url + '&page={}'.format(i))
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(url=url, callback=self.parse_first, endpoint='execute',
+                                args={'lua_source': self.get_link_scripts})
+
+    def parse_first(self, response):
+        urls = response.css('a[data-sqe="link"]::attr(href)').extract()
+        crawl_urls = []
+        for item in urls:
+            # print(item)
+            id_string = re.findall('i.\d+.\d+', item)[-1].split('.')
+            # print(id_string)
+            item_id = id_string[2]
+            shop_id = id_string[1]
+            crawl_urls.append('https://shopee.vn/api/v2/item/get_ratings?&itemid={}&limit=59&offset=0&shopid={}'.format(item_id, shop_id))
+
+        for item in crawl_urls:
+            request = SplashRequest(url=item, callback=self.parse_item, endpoint='execute',
+                          args={'lua_source': self.get_link_scripts})
+            request.meta['offset'] = 0
+            yield request
+
+    def parse_item(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        ratings = data_get['data']['ratings']
+        print('len ratings: ', len(ratings))
+        offset = response.meta['offset']
+        if len(ratings) > 0:
+            for item in ratings:
+                if item['comment'] != '' and item['comment'] is not None:
+                    _data = {}
+                    _data['comment_id'] = item['cmtid']
+                    _data['content'] = item['comment']
+                    _data['user_id'] = item['userid']
+                    _data['user_name'] = item['author_username']
+                    _data['stars'] = item['rating_star']
+                    _data['item_id'] = item['itemid']
+                    _data['shop_id'] = item['shopid']
+                    # InsertToMongo(_data, 'reviews', 'shopee') 
+                    yield _data
+
+            # if len(ratings) == 59:
+            offset += 59
+            request = SplashRequest(url=re.sub('offset=\d+', 'offset={}'.format(offset), response.url),
+                                callback=self.parse_item, endpoint='execute', args={'lua_source': self.wait_script})
+            request.meta['offset'] = offset
+            yield request
+
+class lazada(CrawlSpider):
+
+    name = 'lazada'
+
+    wait_script = """
+    function main(splash, args)
+      assert(splash:go(args.url))
+      assert(splash:wait(1.5))
+      return {
+        html = splash:html(),
+        cookies = splash:get_cookies()
+      }
+    end
+    """
+
+    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+        super(lazada, self).__init__(*args, **kwargs)
+        for i in range(start_page, end_page + 1):
+            self.start_urls.append(url + '&page={}'.format(i))
+
+    def start_requests(self):
+        for url in self.start_urls:
+            yield SplashRequest(url=url, callback=self.parse_first, endpoint='execute', args={'lua_source' : self.wait_script})
+
+    def parse_first(self, response):
+        # for item in response.css('div.c2prKC'):
+        #     if item.css('div.c2JB4x.c6Ntq9') is not None:
+        #         url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
+        #         item_id = re.findall('i\d+', url)[0][1:]
+
+        urls = response.css('div.c16H9d a[age="0"]::attr(href)').extract()
+        print(urls)
+
+
+
+
 class vatgia(CrawlSpider):
     name = 'vatgia'
     # urls = []
@@ -188,74 +366,61 @@ class vatgia(CrawlSpider):
 
         yield data
 
-class lazada(CrawlSpider):
-    name = 'lazada'
-    index = 1
-    start_urls = ['https://www.lazada.vn/dien-thoai-di-dong/?page=1&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ']
 
-    wait_script = """
-    function main(splash, args)
-    assert(splash:go(args.url))
-    assert(splash:wait(0.5))
-    return {
-      html = splash:html(),
-      png = splash:png(),
-      har = splash:har(),
-      cookies = splash:get_cookies(),
-    }
-    end
-    """
 
-    def start_requests(self):
-        for url in self.start_urls:
-            yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script})
 
-    def parse_first(self, response):
-        for item in response.css('div.c2prKC'):
-            if item.css('div.c2JB4x.c6Ntq9') is not None:
-                url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
-                item_id = re.findall('i\d+', url)[0][1:]
-                self.page_num = 1
-                yield SplashRequest(url = 'https://my.lazada.vn/pdp/review/getReviewList?itemId={}&pageSize=5&filter=0&sort=0&pageNo=1'.format(item_id), callback=self.parse_item, endpoint='execute', args={'lua_source' : self.wait_script})
+# class lazada(CrawlSpider):
+#     name = 'lazada'
+#     index = 1
+#     start_urls = ['https://www.lazada.vn/dien-thoai-di-dong/?page=1&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ']
 
-            # time.sleep(5)
+#     wait_script = """
+#     function main(splash, args)
+#     assert(splash:go(args.url))
+#     assert(splash:wait(0.5))
+#     return {
+#       html = splash:html(),
+#       png = splash:png(),
+#       har = splash:har(),
+#       cookies = splash:get_cookies(),
+#     }
+#     end
+#     """
 
-        if self.index < 102:    
-            self.index += 1
-            time.sleep(200)
-            yield SplashRequest(url = 'https://www.lazada.vn/dien-thoai-di-dong/?page={}&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ'.format(self.index),
-                                callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script_2})
+#     def start_requests(self):
+#         for url in self.start_urls:
+#             yield SplashRequest(url = url, callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script})
 
-    # def parse_item(self, response):
-    #     data = {}
-    #     data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
-    #     comments = []
-    #     for item in response.css('div.item'):
-    #         comment = item.css('div.content::text').extract_first()
-    #         if comment is not None:
-    #             stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
-    #             comments.append({'stars': stars, 'comments': comment})
+#     def parse_first(self, response):
+#         for item in response.css('div.c2prKC'):
+#             if item.css('div.c2JB4x.c6Ntq9') is not None:
+#                 url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
+#                 item_id = re.findall('i\d+', url)[0][1:]
+#                 self.page_num = 1
+#                 yield SplashRequest(url = 'https://my.lazada.vn/pdp/review/getReviewList?itemId={}&pageSize=5&filter=0&sort=0&pageNo=1'.format(item_id), callback=self.parse_item, endpoint='execute', args={'lua_source' : self.wait_script})
 
-    #     data['comments'] = comments
-    #     data['url'] = response.url
-    #     yield data
+#             # time.sleep(5)
 
-    def parse_item(self, response):
-        data_get = json.loads(response.css('pre::text').extract_first())
-        items = data_get['model']['items']
-        if items is not None:
-            for item in items:
-                # try:
-                if item['reviewContent'] is not None:
-                    _data = {}
-                    _data['content'] = item['reviewContent']
-                    _data['stars'] = item['rating']
-                    _data['user_name'] = item['buyerName']
-                    _data['user_id'] = item['buyerId']
-                    yield _data
+#         if self.index < 102:    
+#             self.index += 1
+#             time.sleep(200)
+#             yield SplashRequest(url = 'https://www.lazada.vn/dien-thoai-di-dong/?page={}&spm=a2o4n.home.cate_1.1.51a26afeb9omAJ'.format(self.index),
+#                                 callback=self.parse_first, endpoint='execute', args={'lua_source' : wait_script_2})
 
-            self.page_num += 1
-            yield SplashRequest(url= re.sub('pageNo=\d+', 'pageNo={}'.format(self.page_num), response.url), args={'lua_source' : self.wait_script}, callback=self.parse_item, endpoint='execute')
+#     def parse_item(self, response):
+#         data = {}
+#         data['name'] = response.css('span.pdp-mod-product-badge-title::text').extract_first()
+#         comments = []
+#         for item in response.css('div.item'):
+#             comment = item.css('div.content::text').extract_first()
+#             if comment is not None:
+#                 stars = len(item.css('img[src="//laz-img-cdn.alicdn.com/tfs/TB19ZvEgfDH8KJjy1XcXXcpdXXa-64-64.png"]'))
+#                 comments.append({'stars': stars, 'comments': comment})
+
+#         data['comments'] = comments
+#         data['url'] = response.url
+#         yield data
+
 
 class sendo(CrawlSpider):
     name = 'sendo'
@@ -279,45 +444,45 @@ class sendo(CrawlSpider):
     def parse_item(self, response):
         pass
 
-class shopee(CrawlSpider):
-    name = 'shopee'
-    start_urls = ['https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page=0&sortBy=pop']
-    index = 0
+# class shopee(CrawlSpider):
+#     name = 'shopee'
+#     start_urls = ['https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page=0&sortBy=pop']
+#     index = 0
 
 
-    def start_requests(self):
-        for url in self.start_urls:
-            yield SplashRequest(url=url, callback=self.parse_first, args={'lua_source' : wait_script_shopee}, endpoint='execute')
+#     def start_requests(self):
+#         for url in self.start_urls:
+#             yield SplashRequest(url=url, callback=self.parse_first, args={'lua_source' : wait_script_shopee}, endpoint='execute')
 
-    def parse_first(self, response):
-        urls = []
-        for item in response.css('div.shopee-search-item-result__item'):
-            if (item.css('div.shopee-rating-stars').extract_first() is not None):
-                urls.append(item.css('a[data-sqe="link"]::attr(href)').extract_first())
+#     def parse_first(self, response):
+#         urls = []
+#         for item in response.css('div.shopee-search-item-result__item'):
+#             if (item.css('div.shopee-rating-stars').extract_first() is not None):
+#                 urls.append(item.css('a[data-sqe="link"]::attr(href)').extract_first())
 
-        for url in urls:
-            yield SplashRequest(url=response.urljoin(url), callback=self.parse_item, args={'lua_source' : get_comment_script_shopee}, endpoint='execute')
+#         for url in urls:
+#             yield SplashRequest(url=response.urljoin(url), callback=self.parse_item, args={'lua_source' : get_comment_script_shopee}, endpoint='execute')
 
-        if self.index < 99:
-            self.index += 1
-            yield SplashRequest(url='https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page={}&sortBy=pop'.format(self.index), args={'lua_source' : wait_script_shopee}, endpoint='execute', callback=self.parse_first)
+#         if self.index < 99:
+#             self.index += 1
+#             yield SplashRequest(url='https://shopee.vn/%C4%90i%E1%BB%87n-tho%E1%BA%A1i-cat.84.1979?page={}&sortBy=pop'.format(self.index), args={'lua_source' : wait_script_shopee}, endpoint='execute', callback=self.parse_first)
 
 
-    def parse_item(self, response):
-        data = {}
-        url = response.url
-        name = response.css('div.qaNIZv::text').extract_first()
-        comments = []
-        for item in response.css('div.shopee-product-rating__main'):
-            stars = len(item.css('svg.shopee-svg-icon.icon-rating-solid--active.icon-rating-solid').extract())
-            comment = item.css('div.shopee-product-rating__content::text').extract_first()
-            comments.append({'stars': stars, 'comment': comment})
+#     def parse_item(self, response):
+#         data = {}
+#         url = response.url
+#         name = response.css('div.qaNIZv::text').extract_first()
+#         comments = []
+#         for item in response.css('div.shopee-product-rating__main'):
+#             stars = len(item.css('svg.shopee-svg-icon.icon-rating-solid--active.icon-rating-solid').extract())
+#             comment = item.css('div.shopee-product-rating__content::text').extract_first()
+#             comments.append({'stars': stars, 'comment': comment})
 
-        data['url'] = url
-        data['name'] = name
-        data['comments'] = comments
+#         data['url'] = url
+#         data['name'] = name
+#         data['comments'] = comments
 
-        yield data
+#         yield data
 
 class TestVatGia(CrawlSpider):
     name = 'vatgiatest'
@@ -353,7 +518,6 @@ class thegioididong(CrawlSpider):
       }
     end
     """
-
     get_comment_script = """
     function main(splash, args)
       assert(splash:go(args.url))
@@ -379,8 +543,6 @@ class thegioididong(CrawlSpider):
       }
     end
     """
-
-
     start_urls = ["https://www.thegioididong.com/dtdd#i:5"]
 
     def start_requests(self):

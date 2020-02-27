@@ -58,11 +58,8 @@ class tikipost(CrawlSpider):
             InsertToMongo(_data, 'reviews', 'tiki')
             yield _data
 
-
 class shopeepost(CrawlSpider):
-    
     name = 'shopeepost'
-
     wait_script = """
     function main(splash, args)
     assert(splash:go(args.url))
@@ -126,8 +123,6 @@ class lazadapost(CrawlSpider):
     assert(splash:wait(0.5))
     return {
       html = splash:html(),
-      png = splash:png(),
-      har = splash:har(),
       cookies = splash:get_cookies(),
     }
     end
@@ -168,3 +163,50 @@ class lazadapost(CrawlSpider):
 
             self.page_num += 1
             yield SplashRequest(url= re.sub('pageNo=\d+', 'pageNo={}'.format(self.page_num), response.url), args={'lua_source' : self.wait_script}, callback=self.parse_first, endpoint='execute')
+
+class sendopost(CrawlSpider):
+
+    name = 'sendopost'
+
+    wait_script = """
+    function main(splash, args)
+    assert(splash:go(args.url))
+    assert(splash:wait(0.5))
+    return {
+      html = splash:html(),
+      cookies = splash:get_cookies(),
+    }
+    end
+    """
+
+    def __init__(self, url=None, item_id=None, *args, **kwargs):
+        super(sendopost, self).__init__(*args, **kwargs)
+        if url is not None:
+            item_id = re.findall('\d+.html', url)[0][:-5]
+            self.start_urls = ['https://www.sendo.vn/m/wap_v2/san-pham/rating/{}?p=1&s=1000&sort=review_score&v=2'.format(item_id)]
+
+        elif item_id is not None:
+            self.start_urls = ['https://www.sendo.vn/m/wap_v2/san-pham/rating/{}?p=1&s=1000&sort=review_score&v=2'.format(item_id)]
+
+        self.item_id = item_id
+
+    def start_requests(self):
+        for url in self.start_urls:
+            request = SplashRequest(url=url, callback=self.parse_first, args={'lua_source' : self.wait_script}, endpoint = 'execute')
+            yield request
+
+    def parse_first(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        items = data_get['result']['data']
+        for item in items:
+            if item['content'] != '':
+                _data = {}
+                _data['content'] = item['content']
+                _data['stars'] = item['star']
+                _data['comment_id'] = item['rating_id']
+                _data['user_id'] = item['customer_id']
+                _data['user_name'] = item['customer_name']
+                _data['item_id'] = self.item_id
+                yield _data
+
+
