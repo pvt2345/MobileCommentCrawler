@@ -6,6 +6,7 @@ import time
 import requests
 import json
 import pymongo
+import selenium
 
 
 def InsertToMongo(document, database, collection):
@@ -157,9 +158,15 @@ get_comment_script_shopee = """
       }
     end
     """
+
 class tiki(CrawlSpider):
     name = 'tiki'
 
+    custom_settings = {
+
+        "DOWNLOAD_DELAY" : 2
+
+    }
     get_link_scripts = """
     function main(splash, args)
       assert(splash:go(args.url))
@@ -171,10 +178,14 @@ class tiki(CrawlSpider):
     end
     """
 
-    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+    def __init__(self, url='', start_page='1', end_page='1', *args, **kwargs):
         super(tiki, self).__init__(*args, **kwargs)
-        for i in range(start_page, end_page + 1):
+        for i in range(int(start_page), int(end_page)  + 1):
             self.start_urls.append(url + '&page={}'.format(i))
+
+        print(type(start_page))
+        print(type(end_page))
+
 
     def start_requests(self):
         for url in self.start_urls:
@@ -196,6 +207,7 @@ class tiki(CrawlSpider):
             _data['comment_id'] = item['id']
             # InsertToMongo(_data, 'reviews', 'tiki')
             yield _data
+
 
 class shopee(CrawlSpider):
     name = 'shopee'
@@ -236,10 +248,11 @@ class shopee(CrawlSpider):
     end
     """
 
-    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+    def __init__(self, url='', start_page='1', end_page='1', *args, **kwargs):
         super(shopee, self).__init__(*args, **kwargs)
-        for i in range(start_page - 1, end_page):
-            self.start_urls.append(url + '&page={}'.format(i))
+        for i in range(int(start_page) - 1, int(end_page)):
+            self.start_urls.append(url + '&page={}'.format(int(i)))
+
 
     def start_requests(self):
         for url in self.start_urls:
@@ -247,8 +260,10 @@ class shopee(CrawlSpider):
                                 args={'lua_source': self.get_link_scripts})
 
     def parse_first(self, response):
+        print(response.body)
         urls = response.css('a[data-sqe="link"]::attr(href)').extract()
         crawl_urls = []
+        print(urls)
         for item in urls:
             # print(item)
             id_string = re.findall('i.\d+.\d+', item)[-1].split('.')
@@ -256,7 +271,7 @@ class shopee(CrawlSpider):
             item_id = id_string[2]
             shop_id = id_string[1]
             crawl_urls.append('https://shopee.vn/api/v2/item/get_ratings?&itemid={}&limit=59&offset=0&shopid={}'.format(item_id, shop_id))
-
+        # print(crawl_urls)
         for item in crawl_urls:
             request = SplashRequest(url=item, callback=self.parse_item, endpoint='execute',
                           args={'lua_source': self.get_link_scripts})
@@ -296,7 +311,7 @@ class lazada(CrawlSpider):
     wait_script = """
     function main(splash, args)
       assert(splash:go(args.url))
-      assert(splash:wait(1.5))
+      assert(splash:wait(1))
       return {
         html = splash:html(),
         cookies = splash:get_cookies()
@@ -304,13 +319,25 @@ class lazada(CrawlSpider):
     end
     """
 
+    custom_settings = {
+        'DOWNLOAD_DELAY': 5,
+        'COOKIES_ENABLED' : False
+    }
+
     def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
         super(lazada, self).__init__(*args, **kwargs)
-        for i in range(start_page, end_page + 1):
-            self.start_urls.append(url + '&page={}'.format(i))
+
+        parts = url.split('/')
+        if parts[-1] != '':
+            for i in range(start_page, end_page + 1):
+                self.start_urls.append(url + '&ajax=true&page={}'.format(i))
+        else:
+            for i in range(start_page, end_page + 1):
+                self.start_urls.append(url + '?ajax=true&page={}'.format(i))
 
     def start_requests(self):
         for url in self.start_urls:
+            # print(url)
             yield SplashRequest(url=url, callback=self.parse_first, endpoint='execute', args={'lua_source' : self.wait_script})
 
     def parse_first(self, response):
@@ -318,10 +345,58 @@ class lazada(CrawlSpider):
         #     if item.css('div.c2JB4x.c6Ntq9') is not None:
         #         url = item.css('div.c16H9d a[age="0"]::attr(href)').extract_first()
         #         item_id = re.findall('i\d+', url)[0][1:]
+        
+        # print(response.body)
+        # urls = response.css('div.c16H9d a[age="0"]::attr(href)').extract()
+        # print(urls)
+        # print(len(urls))
+        data_get = json.loads(response.css('pre::text').extract_first())
+        urls = []
+        for item in data_get['mods']['listItems']:
+            urls.append('https://my.lazada.vn/pdp/review/getReviewList?itemId={}&pageSize=1000&filter=0&sort=0&pageNo=1'.format(item['itemId']))
 
-        urls = response.css('div.c16H9d a[age="0"]::attr(href)').extract()
         print(urls)
+        for url in urls:
+            yield SplashRequest(url=url, args={'lua_source' : self.wait_script}, endpoint='execute', callback=self.parse_item)
+    
+    def parse_item(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        
+        items = data_get['model']['items']
+        if items is not None:
+            for item in items:
+                # try:
+                if item['reviewContent'] is not None:
+                    _data = {}
+                    _data['content'] = item['reviewContent']
+                    _data['stars'] = item['rating']
+                    _data['user_name'] = item['buyerName']
+                    _data['user_id'] = item['buyerId']
+                    _data['comment_id'] = item['reviewRateId']
+                    # InsertToMongo(_data, 'reviews', 'lazada')
+                    yield _data    
 
+        
+
+    def parse_item(self, response):
+        data_get = json.loads(response.css('pre::text').extract_first())
+        
+        items = data_get['model']['items']
+        if items is not None:
+            for item in items:
+                # try:
+                if item['reviewContent'] is not None:
+                    _data = {}
+                    _data['content'] = item['reviewContent']
+                    _data['stars'] = item['rating']
+                    _data['user_name'] = item['buyerName']
+                    _data['user_id'] = item['buyerId']
+                    _data['comment_id'] = item['reviewRateId']
+                    InsertToMongo(_data, 'reviews', 'lazada')
+                    yield _data
+
+            # self.page_num += 1
+            # yield SplashRequest(url= re.sub('pageNo=\d+', 'pageNo={}'.format(self.page_num), response.url), args={'lua_source' : self.wait_script}, callback=self.parse_first, endpoint='execute')
 
 
 
@@ -424,9 +499,16 @@ class vatgia(CrawlSpider):
 
 class sendo(CrawlSpider):
     name = 'sendo'
+
+    def __init__(self, url='', start_page=1, end_page=1, *args, **kwargs):
+        super(sendo, self).__init__(*args, **kwargs)
+        for i in range(start_page, end_page + 1):
+            self.start_urls.append(url + '&page={}'.format(i))
+
     start_urls = ["https://www.sendo.vn/may-da-qua-su-dung"]
     index = 1
     domain = 'https://www.sendo.vn'
+
     def start_requests(self):
         for url in self.start_urls:
             yield SplashRequest(args={'lua_source' : wait_script}, url=url, callback=self.parse_first, endpoint='execute')
