@@ -205,7 +205,7 @@ class tiki(CrawlSpider):
             _data['user_name'] = item['created_by']['name']
             _data['stars'] = item['rating']
             _data['comment_id'] = item['id']
-            # InsertToMongo(_data, 'reviews', 'tiki')
+            InsertToMongo(_data, 'reviews', 'tiki')
             yield _data
 
 
@@ -294,7 +294,7 @@ class shopee(CrawlSpider):
                     _data['stars'] = item['rating_star']
                     _data['item_id'] = item['itemid']
                     _data['shop_id'] = item['shopid']
-                    # InsertToMongo(_data, 'reviews', 'shopee') 
+                    InsertToMongo(_data, 'reviews', 'shopee') 
                     yield _data
 
             # if len(ratings) == 59:
